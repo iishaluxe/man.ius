@@ -1,0 +1,35 @@
+# Project TODO
+
+- [x] Define durable task, checkpoint, execution event, approval, artifact provenance, and policy domain models in the database schema.
+- [x] Implement task creation, lifecycle updates, task listing, task detail retrieval, and cancellation procedures behind authenticated APIs.
+- [x] Implement provider-neutral structured task planning and live model discovery through the server-side model gateway.
+- [x] Extend the model gateway with tool-call selection, observation interpretation, verification reasoning, recovery decisions, and task summarization interfaces.
+- [x] Implement a capability broker that dispatches shell, filesystem, processes, packages, Git, artifacts, and browser actions through policy enforcement points.
+- [x] Define execution-target routing contracts for Auto, Cloud Sandbox, Persistent Workspace, and Local Bridge modes.
+- [x] Implement the initial E2B production adapter for disposable cloud computers with isolated task sandboxes, secure defaults, scoped shell/filesystem support, and kill cleanup.
+- [ ] Implement persistent-workspace and authenticated local-bridge production adapters.
+- [x] Implement the autonomous loop guards for plan, act, observe, verify, recover, blocked, and cancelled states with stuck detection and connection-aware blocking.
+- [x] Connect policy-approved cloud capability execution to the initial production E2B adapter with durable observations, checkpoints, budgets, and kill-switch cleanup.
+- [ ] Run the complete autonomous loop in a durable checkpoint-resume worker rather than one API request.
+- [x] Implement task-scoped policy evaluation, approval requests, secret references, kill-switch cancellation, and owner-only alert triggers.
+- [x] Persist artifact provenance metadata and expose safe artifact records for task results, logs, snapshots, screenshots, browser traces, and project archives.
+- [x] Build a premium responsive control-plane dashboard with goal input, target selection, budget controls, task history, safety posture, owner-alert states, and accessible kill switch.
+- [x] Build a detailed task workspace with execution plan, observation ledger, approval state, checkpoints, provenance-backed artifacts, and task budget state.
+- [x] Integrate the built-in LLM backend safely for the prototype and expose model settings without putting raw secrets in prompts or UI state.
+- [x] Integrate owner notifications for approval requests, budget limits, unrecoverable failures, and verified completion events.
+- [ ] Add integration tests for task cancellation, artifact provenance persistence, and owner-alert trigger delivery.
+- [ ] Verify the interface at desktop and mobile breakpoints, run type checks and tests, and review runtime logs.
+- [ ] Verify the authenticated control-plane dashboard and detailed task workspace at desktop and mobile breakpoints, including legibility and key empty/loading states.
+- [x] Record the authenticated interface verification results in verification-notes.md before completing visual validation.
+- [ ] Exercise the authenticated dashboard through an authenticated browser session at desktop and mobile widths, then record only directly observed results.
+- [ ] Verify the detailed task workspace with persisted plan, event, artifact, checkpoint, and approval records before completing visual validation.
+- [x] Recover and verify the disconnected development preview service reported by the user.
+- [ ] Diagnose and resolve the reported excessive-server-traffic error.
+- [x] Add a one-click guard to prevent repeated OAuth sign-in requests from the entry screen.
+- [ ] Document the future external-hosting choice and remove the platform-specific OAuth dependency when the user authorizes migration.
+- [ ] Prepare and push the current Agent Computer codebase to the user-provided public GitHub repository after explicit confirmation.
+- [ ] Maintain a clean GitHub branch workflow for subsequent Agent Computer enhancements as authorized by the user.
+- [ ] Synchronize the completed codebase to the user’s public GitHub repository after authorization is available.
+- [x] Confirm the initial hosting decision: keep the prototype on Manus hosting and do not enable an always-on worker yet.
+- [x] Select and document Manus hosting as the initial platform, with Oracle Cloud Always Free retained as the later coordinator migration option.
+- [ ] Prepare the later Oracle Cloud deployment package only after the user explicitly requests migration.
