@@ -5,3 +5,5 @@ export * from "./checkpoint";
 export * from "./runtime";
 export * from "./persistence";
 export * from "./durableRuntime";
+export * from "./worker";
+export * from "./workerTypes";
