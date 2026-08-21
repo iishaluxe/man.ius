@@ -7,3 +7,5 @@ export * from "./persistence";
 export * from "./durableRuntime";
 export * from "./worker";
 export * from "./workerTypes";
+export * from "./executor";
+export * from "./verification";
