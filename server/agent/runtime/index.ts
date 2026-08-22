@@ -9,3 +9,4 @@ export * from "./worker";
 export * from "./workerTypes";
 export * from "./executor";
 export * from "./verification";
+export * from "./agentLoop";
