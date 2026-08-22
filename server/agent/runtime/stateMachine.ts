@@ -6,7 +6,7 @@ const transitions: Record<RuntimeStatus, RuntimeStatus[]> = {
   ready: ["running", "cancelled", "blocked"],
   running: ["waiting", "verifying", "recovering", "completed", "failed", "blocked", "cancelled"],
   waiting: ["running", "cancelled", "blocked", "failed"],
-  verifying: ["completed", "recovering", "failed", "blocked", "cancelled"],
+  verifying: ["ready", "completed", "recovering", "failed", "blocked", "cancelled"],
   recovering: ["running", "failed", "blocked", "cancelled"],
   completed: [], failed: [], blocked: [], cancelled: [],
 };

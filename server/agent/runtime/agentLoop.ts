@@ -8,10 +8,17 @@ export type AgentPlanStep = {
   verification?: VerificationRequirement;
 };
 
+export type AgentPlannerDecision =
+  | AgentPlanStep
+  | null
+  | { kind: "step"; step: AgentPlanStep }
+  | { kind: "no_work"; reason: string }
+  | { kind: "failure"; reason: string };
+
 export type AgentPlanner = (input: {
   snapshot: ReturnType<DurableAgentRuntime["snapshot"]>;
   previousObservation?: CapabilityObservation;
-}) => Promise<AgentPlanStep | null>;
+}) => Promise<AgentPlannerDecision>;
 
 export type AgentRecovery = (input: {
   reason: string;
@@ -30,6 +37,14 @@ export type AgentLoopResult = {
   reason?: string;
 };
 
+function failureReason(error: unknown) {
+  return error instanceof Error ? error.message : "The planner failed without a readable reason.";
+}
+
+function isPlanStep(decision: AgentPlannerDecision): decision is AgentPlanStep {
+  return decision !== null && !("kind" in decision);
+}
+
 export class AgentLoop {
   constructor(
     private readonly runtime: DurableAgentRuntime,
@@ -38,7 +53,7 @@ export class AgentLoop {
   ) {}
 
   async run(): Promise<AgentLoopResult> {
-    let cycles = 0;
+    let cycles = this.runtime.getState().currentStep;
     let previousObservation: CapabilityObservation | undefined;
     const maxCycles = this.options.maxCycles ?? this.runtime.getState().maxSteps;
 
@@ -56,6 +71,10 @@ export class AgentLoop {
         return { status: state.status as AgentLoopResult["status"], cycles };
       }
 
+      // A persisted approval pause must remain paused until an approved caller
+      // resumes the runtime; invoking the planner here would bypass that gate.
+      if (state.status === "waiting") return { status: "waiting", cycles };
+
       if (state.status === "created") {
         this.runtime.start();
         await this.runtime.persistLatestEvent();
@@ -67,25 +86,44 @@ export class AgentLoop {
         await this.runtime.persistLatestEvent();
       }
 
-      const plan = await this.options.planner({
-        snapshot: this.runtime.snapshot(),
-        previousObservation,
-      });
-
-      if (!plan) {
-        // `complete()` is only legal from the running/verifying states in the
-        // protected Phase 1 lifecycle. A planner returning no work is still a
-        // valid terminal decision, so enter a zero-action runtime step first
-        // rather than bypassing the state machine with ready -> completed.
-        this.runtime.setPhase("plan");
-        this.runtime.beginStep("planner:no-work");
-        this.runtime.completeStep({ reason: "Planner returned no remaining work." });
-        this.runtime.complete("Planner returned no remaining work.");
+      let decision: AgentPlannerDecision;
+      try {
+        decision = await this.options.planner({
+          snapshot: this.runtime.snapshot(),
+          previousObservation,
+        });
+      } catch (error) {
+        const reason = failureReason(error);
+        this.runtime.block(reason);
         await this.runtime.persistLatestEvent();
         await this.runtime.persistCheckpoint();
-        return { status: "completed", cycles, reason: "Planner returned no remaining work." };
+        return { status: "blocked", cycles, reason };
       }
 
+      if (decision === null || ("kind" in decision && decision.kind === "no_work")) {
+        const reason = decision === null ? "Planner returned no remaining work." : decision.reason;
+        // A no-work decision can occur from ready or running. When ready, enter a
+        // legal zero-action step before terminal completion rather than bypassing
+        // the protected lifecycle with ready -> completed.
+        if (this.runtime.getState().status === "ready") {
+          this.runtime.setPhase("plan");
+          this.runtime.beginStep("planner:no-work");
+          this.runtime.completeStep({ reason });
+        }
+        this.runtime.complete(reason);
+        await this.runtime.persistLatestEvent();
+        await this.runtime.persistCheckpoint();
+        return { status: "completed", cycles, reason };
+      }
+
+      if ("kind" in decision && decision.kind === "failure") {
+        this.runtime.block(decision.reason);
+        await this.runtime.persistLatestEvent();
+        await this.runtime.persistCheckpoint();
+        return { status: "blocked", cycles, reason: decision.reason };
+      }
+
+      const plan = isPlanStep(decision) ? decision : decision.step;
       this.runtime.setPhase("plan");
       await this.runtime.persistLatestEvent();
 
@@ -119,6 +157,18 @@ export class AgentLoop {
 
       if (verification.passed) {
         this.runtime.verificationPassed(execution.observation.evidence);
+        await this.runtime.persistLatestEvent();
+
+        if (cycles < maxCycles) {
+          // The explicitly authorized verifying -> ready transition permits the
+          // next planning cycle while preserving the state-machine boundary.
+          this.runtime.ready();
+          this.runtime.setPhase("plan");
+          await this.runtime.persistLatestEvent();
+          await this.runtime.persistCheckpoint();
+          continue;
+        }
+
         this.runtime.complete({ verified: true, cycles });
         await this.runtime.persistLatestEvent();
         await this.runtime.persistCheckpoint();
