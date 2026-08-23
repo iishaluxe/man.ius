@@ -4,3 +4,5 @@ export * from "./planningEngine";
 export * from "./replanner";
 export * from "./planningPersistence";
 export * from "./planningCoordinator";
+export * from "./modelPlannerStrategy";
+export * from "./planningLoopCoordinator";
