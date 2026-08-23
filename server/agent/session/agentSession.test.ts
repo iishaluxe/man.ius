@@ -99,3 +99,83 @@ describe("AgentSession", () => {
     expect(entries.some(entry => entry.detail?.includes("not persisted verbatim"))).toBe(false);
   });
 });
+
+
+describe("AgentSession durable resume", () => {
+  const execute = { type: "execute" as const, taskId: "task-1", nodeId: "node-2", action: "next", input: {}, attempt: 1 };
+
+  it("forwards the exact bounded projection to resume and dispatches execute before planning", async () => {
+    const store = await contextStore();
+    const order: string[] = [];
+    let received: unknown;
+    const session = new AgentSession({
+      context: store,
+      planner: { async select() { order.push("plan"); return { type: "complete" }; } },
+      orchestrator: { async run() { order.push("execute"); return { type: "complete" as const }; } },
+      resumeBoundary: {
+        async resume(input) {
+          received = input;
+          order.push("resume");
+          return execute;
+        },
+      },
+    });
+
+    await expect(session.resume("task-1", "plan-existing", { maxCycles: 1 }))
+      .resolves.toEqual({ status: "completed", taskId: "task-1" });
+    expect(order).toEqual(["resume", "execute"]);
+    expect(received).toMatchObject({ taskId: "task-1", planId: "plan-existing", context: { goal: "Finish task" } });
+    expect(received).not.toHaveProperty("context.entries");
+  });
+
+  it("does not call the resume bridge after cancellation", async () => {
+    const store = await contextStore();
+    let resumes = 0;
+    const controller = new AbortController();
+    controller.abort();
+    const session = new AgentSession({
+      context: store,
+      planner: { async select() { return { type: "complete" }; } },
+      orchestrator: completeOrchestrator,
+      resumeBoundary: { async resume() { resumes += 1; return execute; } },
+    });
+
+    await expect(session.resume("task-1", "plan-existing", { maxCycles: 2, signal: controller.signal }))
+      .resolves.toMatchObject({ status: "cancelled" });
+    expect(resumes).toBe(0);
+  });
+
+  it("terminates complete and blocked resumed decisions without execution", async () => {
+    const store = await contextStore();
+    let executions = 0;
+    const makeSession = (decision: { type: "complete" } | { type: "blocked"; reason: string }) => new AgentSession({
+      context: store,
+      planner: { async select() { return { type: "complete" }; } },
+      orchestrator: { async run() { executions += 1; return { type: "complete" as const }; } },
+      resumeBoundary: { async resume() { return decision; } },
+    });
+
+    await expect(makeSession({ type: "complete" }).resume("task-1", "plan-complete", { maxCycles: 1 }))
+      .resolves.toEqual({ status: "completed", taskId: "task-1" });
+    await expect(makeSession({ type: "blocked", reason: "blocked" }).resume("task-1", "plan-blocked", { maxCycles: 1 }))
+      .resolves.toEqual({ status: "blocked", taskId: "task-1", reason: "blocked" });
+    expect(executions).toBe(0);
+  });
+
+  it("allows normal planning only after resumed orchestration continuation and remains bounded", async () => {
+    const store = await contextStore();
+    let plans = 0;
+    let executions = 0;
+    const session = new AgentSession({
+      context: store,
+      planner: { async select() { plans += 1; return { type: "complete" }; } },
+      orchestrator: { async run() { executions += 1; return { type: "continue" as const, nodeId: "node" }; } },
+      resumeBoundary: { async resume() { return execute; } },
+    });
+
+    await expect(session.resume("task-1", "plan-existing", { maxCycles: 2 }))
+      .resolves.toEqual({ status: "completed", taskId: "task-1" });
+    expect(executions).toBe(1);
+    expect(plans).toBe(1);
+  });
+});

@@ -14,6 +14,7 @@ import type { SessionDependencies } from "./agentSessionPorts";
 import { ContextAwarePlanningAdapter } from "./contextAwarePlanningAdapter";
 import { ContextSessionJournal } from "./contextSessionJournal";
 import { PlanningOrchestratorAdapter } from "./planningOrchestratorAdapter";
+import { DurableSessionResume } from "./durableSessionResume";
 
 export type PlanningSessionCompositionOptions = {
   context: TaskContextStore;
@@ -49,5 +50,6 @@ export function createPlanningSessionDependencies(
     context: options.context,
     planner,
     orchestrator: new PlanningOrchestratorAdapter(orchestrator, planningLoop),
+    resumeBoundary: new DurableSessionResume(planningLoop),
   };
 }

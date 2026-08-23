@@ -59,3 +59,41 @@ describe("bounded top-level AgentLoop", () => {
     expect(runs).toBe(1);
   });
 });
+
+
+describe("AgentLoop resumed execution seam", () => {
+  it("dispatches the supplied executable decision before any planner selection", async () => {
+    const calls: string[] = [];
+    const subject = make(
+      async () => { calls.push("plan"); return { type: "complete" as const }; },
+      async () => { calls.push("execute"); return { type: "complete" as const }; },
+    );
+
+    await expect(subject.loop.runFromDecision!({ taskId: "t", maxCycles: 2 }, execute, new AbortController().signal))
+      .resolves.toEqual({ status: "completed" });
+    expect(calls).toEqual(["execute"]);
+  });
+
+  it("does not dispatch a resumed decision after pre-resume cancellation", async () => {
+    let runs = 0;
+    const subject = make(async () => ({ type: "complete" as const }), async () => { runs += 1; return { type: "complete" as const }; });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(subject.loop.runFromDecision!({ taskId: "t", maxCycles: 2 }, execute, controller.signal))
+      .resolves.toMatchObject({ status: "cancelled" });
+    expect(runs).toBe(0);
+  });
+
+  it("plans only after resumed continuation and respects the remaining cycle budget", async () => {
+    let selections = 0;
+    const subject = make(
+      async () => { selections += 1; return { type: "complete" as const }; },
+      async () => ({ type: "continue" as const, nodeId: "n" }),
+    );
+
+    await expect(subject.loop.runFromDecision!({ taskId: "t", maxCycles: 2 }, execute, new AbortController().signal))
+      .resolves.toEqual({ status: "completed" });
+    expect(selections).toBe(1);
+  });
+});

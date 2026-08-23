@@ -1,4 +1,5 @@
 import type { ContextProjection } from "../context/contextProjection";
+import type { PlanningLoopCoordinator } from "../planning/planningLoopCoordinator";
 import type { TaskContextStore } from "../context/taskContextStore";
 import type { LoopJournal, LoopOrchestrator, LoopPlanner } from "../loop/agentLoopPorts";
 import type { LoopDecision, LoopResult } from "../loop/agentLoopTypes";
@@ -17,6 +18,19 @@ export interface ContextAwarePlanner {
 
 export interface SessionLoop {
   run(context: { taskId: string; maxCycles: number }, signal: AbortSignal): Promise<LoopResult>;
+  runFromDecision?(
+    context: { taskId: string; maxCycles: number },
+    decision: Extract<LoopDecision, { type: "execute" }>,
+    signal: AbortSignal,
+  ): Promise<LoopResult>;
+}
+
+export interface DurableResumeBoundary {
+  resume(input: {
+    taskId: string;
+    planId: string;
+    context: ContextProjection;
+  }): Promise<LoopDecision>;
 }
 
 export interface SessionEventSink {
@@ -40,4 +54,5 @@ export type SessionDependencies = {
   events?: SessionEventSink;
   loopFactory?: SessionLoopFactory;
   projectionLimit?: number;
+  resumeBoundary?: DurableResumeBoundary;
 };

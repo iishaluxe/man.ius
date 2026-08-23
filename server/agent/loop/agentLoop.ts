@@ -23,58 +23,97 @@ export class AgentLoop {
     context: LoopContext,
     signal: AbortSignal = new AbortController().signal,
   ): Promise<LoopResult> {
-    if (!Number.isInteger(context.maxCycles) || context.maxCycles < 1) {
-      return { status: "failed", reason: "Invalid loop cycle budget" };
-    }
-
+    if (!this.validBudget(context)) return { status: "failed", reason: "Invalid loop cycle budget" };
     await this.journal.append({ type: "loop_started", taskId: context.taskId });
 
     for (let cycle = 0; cycle < context.maxCycles; cycle += 1) {
       if (signal.aborted) return this.cancel(context.taskId, "cancelled before planning");
-
       let decision: LoopDecision;
       try {
         decision = await this.planner.select(context.taskId);
       } catch (error) {
         return this.fail(context.taskId, errorMessage(error));
       }
-      await this.journal.append({ type: "loop_decision", taskId: context.taskId, detail: decision.type });
+      const terminal = await this.handleDecision(context, decision, signal);
+      if (terminal) return terminal;
+    }
 
-      if (decision.type === "complete") {
-        await this.journal.append({ type: "loop_completed", taskId: context.taskId });
-        return { status: "completed" };
-      }
-      if (decision.type === "blocked") {
-        await this.journal.append({ type: "loop_blocked", taskId: context.taskId, detail: decision.reason });
-        return { status: "blocked", reason: decision.reason };
-      }
+    return this.exhausted(context);
+  }
 
-      let outcome;
+  /** Dispatches a persisted executable decision before any planner selection. */
+  async runFromDecision(
+    context: LoopContext,
+    decision: Extract<LoopDecision, { type: "execute" }>,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<LoopResult> {
+    if (!this.validBudget(context)) return { status: "failed", reason: "Invalid loop cycle budget" };
+    await this.journal.append({ type: "loop_started", taskId: context.taskId });
+    if (signal.aborted) return this.cancel(context.taskId, "cancelled before resumed dispatch");
+
+    const terminal = await this.handleDecision(context, decision, signal);
+    if (terminal) return terminal;
+
+    for (let cycle = 1; cycle < context.maxCycles; cycle += 1) {
+      if (signal.aborted) return this.cancel(context.taskId, "cancelled before planning");
+      let next: LoopDecision;
       try {
-        // Exactly one orchestration attempt for this cycle: never retry here.
-        outcome = await this.orchestrator.run(decision, signal);
+        next = await this.planner.select(context.taskId);
       } catch (error) {
         return this.fail(context.taskId, errorMessage(error));
       }
-
-      switch (outcome.type) {
-        case "complete":
-          await this.journal.append({ type: "loop_completed", taskId: context.taskId });
-          return { status: "completed" };
-        case "blocked":
-          await this.journal.append({ type: "loop_blocked", taskId: context.taskId, detail: outcome.reason });
-          return { status: "blocked", reason: outcome.reason };
-        case "failed":
-          return this.fail(context.taskId, outcome.reason);
-        case "cancelled":
-          return this.cancel(context.taskId, outcome.reason);
-        case "continue":
-        case "replan":
-          // Planner gets control again only in the next bounded cycle.
-          break;
-      }
+      const nextTerminal = await this.handleDecision(context, next, signal);
+      if (nextTerminal) return nextTerminal;
     }
 
+    return this.exhausted(context);
+  }
+
+  private validBudget(context: LoopContext): boolean {
+    return Number.isInteger(context.maxCycles) && context.maxCycles >= 1;
+  }
+
+  private async handleDecision(
+    context: LoopContext,
+    decision: LoopDecision,
+    signal: AbortSignal,
+  ): Promise<LoopResult | undefined> {
+    await this.journal.append({ type: "loop_decision", taskId: context.taskId, detail: decision.type });
+
+    if (decision.type === "complete") {
+      await this.journal.append({ type: "loop_completed", taskId: context.taskId });
+      return { status: "completed" };
+    }
+    if (decision.type === "blocked") {
+      await this.journal.append({ type: "loop_blocked", taskId: context.taskId, detail: decision.reason });
+      return { status: "blocked", reason: decision.reason };
+    }
+
+    let outcome;
+    try {
+      outcome = await this.orchestrator.run(decision, signal);
+    } catch (error) {
+      return this.fail(context.taskId, errorMessage(error));
+    }
+
+    switch (outcome.type) {
+      case "complete":
+        await this.journal.append({ type: "loop_completed", taskId: context.taskId });
+        return { status: "completed" };
+      case "blocked":
+        await this.journal.append({ type: "loop_blocked", taskId: context.taskId, detail: outcome.reason });
+        return { status: "blocked", reason: outcome.reason };
+      case "failed":
+        return this.fail(context.taskId, outcome.reason);
+      case "cancelled":
+        return this.cancel(context.taskId, outcome.reason);
+      case "continue":
+      case "replan":
+        return undefined;
+    }
+  }
+
+  private async exhausted(context: LoopContext): Promise<LoopResult> {
     const reason = `Loop cycle budget exhausted: ${context.maxCycles}`;
     await this.journal.append({ type: "loop_blocked", taskId: context.taskId, detail: reason });
     return { status: "blocked", reason };
