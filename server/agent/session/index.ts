@@ -2,5 +2,8 @@ export * from "./agentSession";
 export * from "./agentSessionPorts";
 export * from "./agentSessionTypes";
 export * from "./contextPlannerAdapter";
+export * from "./contextAwarePlanningAdapter";
 export * from "./contextSessionJournal";
+export * from "./planningOrchestratorAdapter";
+export * from "./planningSessionComposition";
 export * from "./sessionLoopJournal";
