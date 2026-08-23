@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ContextProjection } from "../context/contextProjection";
-import type { PlanPersistence } from "./planningPersistence";
+import { InMemoryPlanPersistence, type PlanPersistence } from "./planningPersistence";
 import { PlanningCoordinator } from "./planningCoordinator";
 import { PlanningLoopCoordinator } from "./planningLoopCoordinator";
 import type { PlannerStrategy } from "./replanner";
@@ -58,5 +58,45 @@ describe("PlanningLoopCoordinator", () => {
     await bridge.applyOutcome("task-1", { type: "replan", reason: "verification" });
     expect((await store.load("plan-inspect-workspace"))?.nodes[0].status).toBe("failed");
     expect(bridge.getActivePlan("task-1")?.nodes[0].title).toBe("Inspect");
+  });
+
+  it("resumes the same persisted plan on a recreated coordinator without invoking the planner strategy", async () => {
+    const store = new InMemoryPlanPersistence();
+    const initialStrategy: PlannerStrategy = {
+      async propose() {
+        return {
+          nodes: [
+            { id: "n1", title: "Inspect", description: "Inspect the workspace", dependencies: [], status: "pending", priority: 2, metadata: { capability: "filesystem.list", expectedEvidence: "listing", risk: "low" } },
+            { id: "n2", title: "Summarize", description: "Summarize the listing", dependencies: ["n1"], status: "pending", priority: 1, metadata: { capability: "text.summarize", expectedEvidence: "summary", risk: "low" } },
+          ],
+        };
+      },
+    };
+    const first = new PlanningLoopCoordinator(new PlanningCoordinator(initialStrategy, store));
+    await expect(first.selectWithContext("task-1", projection)).resolves.toMatchObject({ type: "execute", nodeId: "n1" });
+    await first.applyOutcome("task-1", { type: "continue", nodeId: "n1" });
+    const persistedBefore = await store.load("plan-inspect-workspace");
+    expect(persistedBefore?.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: "n1", status: "completed" })]));
+
+    let strategyCalls = 0;
+    const restartedStrategy: PlannerStrategy = {
+      async propose() {
+        strategyCalls += 1;
+        return { nodes: [] };
+      },
+    };
+    const restarted = new PlanningLoopCoordinator(new PlanningCoordinator(restartedStrategy, store));
+    const resumed = await restarted.resumeWithContext("task-1-restarted", "plan-inspect-workspace", {
+      ...projection,
+      goal: "unrelated replacement goal",
+    });
+
+    expect(resumed).toMatchObject({ type: "execute", taskId: "task-1-restarted", nodeId: "n2", action: "Summarize" });
+    expect(strategyCalls).toBe(0);
+    expect(await store.load("plan-inspect-workspace")).toEqual(persistedBefore);
+    expect(restarted.getActivePlan("task-1-restarted")?.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "n1", status: "completed" }),
+      expect.objectContaining({ id: "n2", status: "pending" }),
+    ]));
   });
 });

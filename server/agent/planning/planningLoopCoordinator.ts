@@ -70,6 +70,20 @@ export class PlanningLoopCoordinator implements LoopPlanner {
     return this.toLoopDecision(taskId, decision);
   }
 
+  /**
+   * Resumes an existing persisted plan without creating or replanning it.
+   * Context remains explicit for the session-facing API but is intentionally
+   * unused until a later, separately authorized replan decision.
+   */
+  async resumeWithContext(
+    taskId: string,
+    planId: string,
+    _context: ContextProjection,
+  ): Promise<LoopDecision> {
+    const decision = await this.planning.resume(planId);
+    return this.toLoopDecision(taskId, decision);
+  }
+
   async applyOutcome(taskId: string, outcome: OrchestrationOutcome): Promise<void> {
     const active = this.active.get(taskId);
     if (!active?.nodeId) return;
