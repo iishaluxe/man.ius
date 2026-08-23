@@ -1,4 +1,6 @@
-import type { ContextEngine } from "../context/contextEngine";
+import type { ContextProjection } from "../context/contextProjection";
+import type { ContextProjectionView } from "../context/contextEngine";
+import type { TaskContextEntry } from "../context/taskContext";
 import type { LoopPlanner } from "../loop/agentLoopPorts";
 import type { LoopDecision } from "../loop/agentLoopTypes";
 import type { OrchestrationOutcome } from "../orchestration/orchestrationTypes";
@@ -15,6 +17,28 @@ function stringMetadata(node: PlanNode, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function cloneEntry(entry: TaskContextEntry): TaskContextEntry {
+  return { ...entry, metadata: entry.metadata ? { ...entry.metadata } : undefined };
+}
+
+/** Converts only the five bounded Phase 21 entries into the durable planner view. */
+function toPlanningContext(context: ContextProjection): ContextProjectionView {
+  const entries = [
+    context.recentPlan,
+    context.recentObservation,
+    context.recentVerification,
+    context.recentFailure,
+    context.recentRecovery,
+  ].filter((entry): entry is TaskContextEntry => Boolean(entry));
+  const uniqueEntries = Array.from(new Map(entries.map(entry => [entry.id, cloneEntry(entry)])).values());
+  return {
+    goal: context.goal,
+    currentStep: context.currentStep,
+    facts: { ...context.facts },
+    entries: uniqueEntries,
+  };
+}
+
 /**
  * Selection-only bridge from durable PlanningCoordinator decisions into the
  * bounded Phase 20 LoopPlanner contract. The composition root must pair its
@@ -24,21 +48,22 @@ function stringMetadata(node: PlanNode, key: string): string | undefined {
 export class PlanningLoopCoordinator implements LoopPlanner {
   private readonly active = new Map<string, ActivePlan>();
 
-  constructor(
-    private readonly planning: PlanningCoordinator,
-    private readonly context: ContextEngine,
-  ) {}
+  constructor(private readonly planning: PlanningCoordinator) {}
 
-  async select(taskId: string): Promise<LoopDecision> {
-    const projection = await this.context.project();
+  async select(_taskId: string): Promise<LoopDecision> {
+    throw new Error("PlanningLoopCoordinator.select() requires explicit context; use selectWithContext().");
+  }
+
+  async selectWithContext(taskId: string, context: ContextProjection): Promise<LoopDecision> {
+    const planningContext = toPlanningContext(context);
     let decision: PlanningDecision;
 
     if (!this.active.has(taskId)) {
-      decision = await this.planning.start(projection.goal, projection);
+      decision = await this.planning.start(planningContext.goal, planningContext);
     } else {
       decision = this.planning.decide();
       if (decision.type === "replan") {
-        decision = await this.planning.replan(projection.goal, projection, decision.reason);
+        decision = await this.planning.replan(planningContext.goal, planningContext, decision.reason);
       }
     }
 
