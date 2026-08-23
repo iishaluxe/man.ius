@@ -9,6 +9,7 @@ import { AgentOrchestrator } from "../orchestration/orchestrator";
 import { PlanningCoordinator } from "../planning/planningCoordinator";
 import { PlanningLoopCoordinator } from "../planning/planningLoopCoordinator";
 import type { PlanPersistence } from "../planning/planningPersistence";
+import { ModelPlannerStrategy, type ModelPlannerStrategyOptions } from "../planning/modelPlannerStrategy";
 import type { PlannerStrategy } from "../planning/replanner";
 import type { SessionDependencies } from "./agentSessionPorts";
 import { ContextAwarePlanningAdapter } from "./contextAwarePlanningAdapter";
@@ -18,7 +19,8 @@ import { DurableSessionResume } from "./durableSessionResume";
 
 export type PlanningSessionCompositionOptions = {
   context: TaskContextStore;
-  plannerStrategy: PlannerStrategy;
+  plannerStrategy?: PlannerStrategy;
+  modelPlannerOptions?: ModelPlannerStrategyOptions;
   planningPersistence: PlanPersistence;
   executor: OrchestrationExecutor;
   observer: ObservationSource;
@@ -34,7 +36,8 @@ export type PlanningSessionCompositionOptions = {
 export function createPlanningSessionDependencies(
   options: PlanningSessionCompositionOptions,
 ): SessionDependencies {
-  const planning = new PlanningCoordinator(options.plannerStrategy, options.planningPersistence);
+  const plannerStrategy = options.plannerStrategy ?? new ModelPlannerStrategy(options.modelPlannerOptions);
+  const planning = new PlanningCoordinator(plannerStrategy, options.planningPersistence);
   const planningLoop = new PlanningLoopCoordinator(planning);
   const planner = new ContextAwarePlanningAdapter(planningLoop);
   const journal = new ContextSessionJournal(options.context);
