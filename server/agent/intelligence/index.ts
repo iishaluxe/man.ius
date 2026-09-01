@@ -6,3 +6,5 @@ export * from "./adaptivePlanningStrategy";
 export * from "./adaptiveIntelligenceGateway";
 
 export * from "./intelligenceEvaluation";
+
+export * from "./intelligenceFeedback";
