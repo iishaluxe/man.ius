@@ -7,3 +7,5 @@ export * from "./adaptiveIntelligenceGateway";
 export * from "./intelligenceEvaluation";
 export * from "./intelligenceFeedback";
 export * from "./intelligenceLearning";
+
+export * from "./evidenceCalibration";
