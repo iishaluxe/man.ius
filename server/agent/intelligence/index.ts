@@ -4,3 +4,5 @@ export * from "./modelRegistry";
 export * from "./adaptiveModelRouter";
 export * from "./adaptivePlanningStrategy";
 export * from "./adaptiveIntelligenceGateway";
+
+export * from "./intelligenceEvaluation";
