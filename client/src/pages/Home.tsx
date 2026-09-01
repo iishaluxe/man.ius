@@ -39,6 +39,7 @@ export default function Home() {
   const [modelId, setModelId] = useState("");
   const createTask = trpc.agent.create.useMutation();
   const generatePlan = trpc.agent.generatePlan.useMutation();
+  const runTask = trpc.agent.runTask.useMutation();
   const cancelTask = trpc.agent.cancel.useMutation();
 
   const tasks = overview.data?.tasks ?? [];
@@ -63,9 +64,24 @@ export default function Home() {
       });
       toast.success("Task captured. Generating a bounded plan…");
       await generatePlan.mutateAsync({ taskId: task.id });
-      toast.success("Plan checkpointed and ready for a secure execution adapter.");
+      toast.success("Plan checkpointed. Running the plan through the execution adapter…");
       setGoal("");
       setTitle("");
+      await utils.agent.overview.invalidate();
+
+      // Plan generation and execution are separate steps so a planning
+      // failure never triggers real capability dispatches. A run failure
+      // here (blocked, waiting on approval, etc.) is a normal outcome, not
+      // an unexpected error, so it gets its own try/catch and its own
+      // (non-error) toast rather than falling into the block above.
+      try {
+        const result = await runTask.mutateAsync({ taskId: task.id });
+        if (result.outcome === "completed") toast.success(result.message);
+        else if (result.outcome === "waiting_approval") toast(result.message);
+        else if (result.outcome !== "no_op") toast.warning(result.message);
+      } catch (runError) {
+        toast.error(runError instanceof Error ? runError.message : "The task could not run.");
+      }
       await utils.agent.overview.invalidate();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The task could not be planned.");
