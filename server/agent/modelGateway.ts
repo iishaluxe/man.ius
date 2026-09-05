@@ -227,6 +227,44 @@ export async function decideRecovery(input: { modelId?: string | null; goal: str
   });
 }
 
+export type CapabilityArguments = {
+  command?: string;
+  path?: string;
+  content?: string;
+  url?: string;
+  notes?: string;
+};
+
+/**
+ * Turns a single planned step into the concrete, structured arguments the
+ * execution adapter needs (e.g. an actual shell command, not a description
+ * of one). This is distinct from selectToolAction, which only summarizes
+ * intent — the adapter cannot act on a summary string.
+ */
+export async function selectCapabilityArguments(input: {
+  modelId?: string | null;
+  taskGoal: string;
+  step: { title: string; description: string; capability: string; expectedEvidence: string };
+  priorObservations: string[];
+}) {
+  return invokeStructured<CapabilityArguments>({
+    modelId: input.modelId,
+    schemaName: "agent_capability_arguments",
+    schema: {
+      type: "object",
+      properties: {
+        command: { type: "string" },
+        path: { type: "string" },
+        content: { type: "string" },
+        url: { type: "string" },
+        notes: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    prompt: `Goal:\n${input.taskGoal}\n\nStep to perform now:\nTitle: ${input.step.title}\nDescription: ${input.step.description}\nCapability: ${input.step.capability}\nExpected evidence: ${input.step.expectedEvidence}\n\nPrior observations:\n${input.priorObservations.join("\n") || "None"}\n\nReturn only the fields this specific capability needs (for example "command" for shell.exec/process.start/package.install/git.operation, or "path" and "content" for filesystem writes, or "path" for filesystem reads/listings). Never include a raw secret value; use a secret:// reference string if a credential is required. Leave unrelated fields absent.`,
+  });
+}
+
 export async function summarizeTask(input: { modelId?: string | null; goal: string; events: string[] }) {
   return invokeStructured<{ summary: string; outcome: "completed" | "blocked" | "failed" | "cancelled" }>({
     modelId: input.modelId,

@@ -10,6 +10,8 @@ import { PlanningCoordinator } from "../planning/planningCoordinator";
 import { PlanningLoopCoordinator } from "../planning/planningLoopCoordinator";
 import type { PlanPersistence } from "../planning/planningPersistence";
 import { ModelPlannerStrategy, type ModelPlannerStrategyOptions } from "../planning/modelPlannerStrategy";
+import { AdaptivePlanningStrategy, type AdaptivePlanningPolicy } from "../intelligence/adaptivePlanningStrategy";
+import type { AdaptiveModelRouter } from "../intelligence/adaptiveModelRouter";
 import type { PlannerStrategy } from "../planning/replanner";
 import type { SessionDependencies } from "./agentSessionPorts";
 import { ContextAwarePlanningAdapter } from "./contextAwarePlanningAdapter";
@@ -21,6 +23,12 @@ export type PlanningSessionCompositionOptions = {
   context: TaskContextStore;
   plannerStrategy?: PlannerStrategy;
   modelPlannerOptions?: ModelPlannerStrategyOptions;
+  adaptivePlanning?: {
+    enabled?: boolean;
+    router?: AdaptiveModelRouter;
+    policy?: AdaptivePlanningPolicy;
+    plannerOptions?: ModelPlannerStrategyOptions;
+  };
   planningPersistence: PlanPersistence;
   executor: OrchestrationExecutor;
   observer: ObservationSource;
@@ -36,7 +44,22 @@ export type PlanningSessionCompositionOptions = {
 export function createPlanningSessionDependencies(
   options: PlanningSessionCompositionOptions,
 ): SessionDependencies {
-  const plannerStrategy = options.plannerStrategy ?? new ModelPlannerStrategy(options.modelPlannerOptions);
+  let plannerStrategy = options.plannerStrategy;
+  if (!plannerStrategy) {
+    const adaptive = options.adaptivePlanning;
+    if (adaptive?.enabled) {
+      if (!adaptive.router || !adaptive.policy) {
+        throw new Error("Adaptive planning requires an explicit router and policy.");
+      }
+      plannerStrategy = new AdaptivePlanningStrategy(
+        adaptive.plannerOptions ?? options.modelPlannerOptions,
+        adaptive.router,
+        adaptive.policy,
+      );
+    } else {
+      plannerStrategy = new ModelPlannerStrategy(options.modelPlannerOptions);
+    }
+  }
   const planning = new PlanningCoordinator(plannerStrategy, options.planningPersistence);
   const planningLoop = new PlanningLoopCoordinator(planning);
   const planner = new ContextAwarePlanningAdapter(planningLoop);

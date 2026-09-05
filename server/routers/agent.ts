@@ -25,6 +25,7 @@ import { E2BCloudSandboxAdapter } from "../agent/e2bAdapter";
 import { generatePlan, getAvailableModels } from "../agent/modelGateway";
 import { assessBudget, canTransition, evaluateCapabilityPolicy, type TaskStatus } from "../agent/policy";
 import { capabilityRegistry, executionTargets } from "../agent/registry";
+import { runAgentTask } from "../agent/taskRunner";
 import { notifyOwner } from "../_core/notification";
 import { protectedProcedure, router } from "../_core/trpc";
 import { storagePut } from "../storage";
@@ -130,6 +131,15 @@ export const agentRouter = router({
       await alertOwner({ kind: "failure", taskId: task.id, taskTitle: task.title, detail: "Planning could not produce a valid structured plan." });
       throw new TRPCError({ code: "BAD_GATEWAY", message: "The model gateway could not produce a safe structured plan." });
     }
+  }),
+
+  runTask: protectedProcedure.input(z.object({ taskId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
+    const task = await getAgentTask(input.taskId, ctx.user.id);
+    if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task was not found." });
+    if (!["queued", "executing", "recovering"].includes(task.status)) {
+      throw new TRPCError({ code: "CONFLICT", message: `Task cannot be run from status "${task.status}".` });
+    }
+    return runAgentTask(task.id, ctx.user.id, capabilityBroker);
   }),
 
   requestApproval: protectedProcedure.input(z.object({
