@@ -260,3 +260,15 @@ export async function updateTaskUsage(input: {
     .where(and(eq(agentTasks.id, input.taskId), eq(agentTasks.ownerId, input.ownerId)));
   return getAgentTask(input.taskId, input.ownerId);
 }
+
+export async function updatePlanStepStatus(input: {
+  id: string;
+  taskId: string;
+  status: AgentPlanStep["status"];
+}) {
+  const db = await requireDb();
+  await db
+    .update(agentPlanSteps)
+    .set({ status: input.status })
+    .where(and(eq(agentPlanSteps.id, input.id), eq(agentPlanSteps.taskId, input.taskId)));
+}

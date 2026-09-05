@@ -124,3 +124,81 @@ describe("real model planning composition", () => {
     expect(providerCalls).toBe(1);
   });
 });
+
+
+describe("adaptive planning composition", () => {
+  const adaptivePlan = {
+    taskSummary: "Adaptive plan",
+    executionRationale: "Use the selected model.",
+    steps: [{ title: "Inspect workspace", description: "List the workspace.", capability: "filesystem.list", expectedEvidence: "listing", risk: "low" as const }],
+  };
+
+  function profile(id: string, tier: 1 | 2 | 3 = 1) {
+    return {
+      id,
+      provider: "deterministic-provider",
+      tier,
+      contextWindowTokens: 16_000,
+      domains: [{ domain: "planning" as const, score: 1 }],
+      maximumRisk: "low" as const,
+      structuredOutput: true,
+      averageLatencyMs: 100,
+      cost: { inputPerMillionTokensUsd: 1, outputPerMillionTokensUsd: 2 },
+      reliabilityScore: 0.95,
+      enabled: true,
+    };
+  }
+
+  async function baseOptions(goal: string, provider: NonNullable<NonNullable<Parameters<typeof createPlanningSessionDependencies>[0]["modelPlannerOptions"]>["provider"]>, extra: Partial<Parameters<typeof createPlanningSessionDependencies>[0]> = {}) {
+    const context = new TaskContextStore(new InMemoryTaskContextRepository());
+    await context.save({ taskId: "adaptive-task", goal, currentStep: 0, facts: { bounded: "yes" }, entries: [] });
+    return {
+      context,
+      modelPlannerOptions: { provider },
+      planningPersistence: persistence(),
+      executor: { async execute() { return { result: "ok" }; } },
+      observer: { async observe() { return [{ kind: "result", value: "ok", source: "adaptive-test" }]; } },
+      verifier: { async verify() { return { status: "verified" }; } },
+      orchestrationPlanner: { async next(_taskId: string, nodeId: string) { return { type: "complete" as const, nodeId }; } },
+      ...extra,
+    };
+  }
+
+  it("uses the configured adaptive router once and forwards its selected model to the existing provider boundary", async () => {
+    const registry = new (await import("../intelligence/modelRegistry")).ModelRegistry();
+    registry.register(profile("adaptive-selected"));
+    const baseRouter = new (await import("../intelligence/adaptiveModelRouter")).AdaptiveModelRouter(registry);
+    let routeCalls = 0;
+    const router = { route(input: Parameters<typeof baseRouter.route>[0]) { routeCalls += 1; return baseRouter.route(input); } };
+    let providerModelId: string | null | undefined;
+    const options = await baseOptions("Adaptive planning", async input => { providerModelId = input.modelId; return adaptivePlan; }, {
+      adaptivePlanning: { enabled: true, router, policy: { complexity: 1, risk: "low" as const }, plannerOptions: undefined },
+    });
+    await expect(new AgentSession(createPlanningSessionDependencies(options)).run("adaptive-task", { maxCycles: 2 })).resolves.toEqual({ status: "completed", taskId: "adaptive-task" });
+    expect(routeCalls).toBe(1);
+    expect(providerModelId).toBe("adaptive-selected");
+  });
+
+  it("keeps explicit custom strategy authoritative and does not call the adaptive router", async () => {
+    const registry = new (await import("../intelligence/modelRegistry")).ModelRegistry();
+    registry.register(profile("should-not-route"));
+    let routeCalls = 0;
+    const router = { route() { routeCalls += 1; throw new Error("router should not be called"); } };
+    const strategy: PlannerStrategy = { async propose() { return { nodes: [{ id: "n1", title: "Custom", description: "Custom", dependencies: [], status: "pending", priority: 1, metadata: { capability: "filesystem.list", expectedEvidence: "listing", risk: "low" } }] }; } };
+    const options = await baseOptions("Custom planning", async () => adaptivePlan, { plannerStrategy: strategy, adaptivePlanning: { enabled: true, router, policy: { complexity: 1, risk: "low" as const } } });
+    await expect(new AgentSession(createPlanningSessionDependencies(options)).run("adaptive-task", { maxCycles: 2 })).resolves.toEqual({ status: "completed", taskId: "adaptive-task" });
+    expect(routeCalls).toBe(0);
+  });
+
+  it("fails closed on router errors without invoking the provider or executor", async () => {
+    let providerCalls = 0;
+    let executions = 0;
+    const options = await baseOptions("Router failure", async () => { providerCalls += 1; return adaptivePlan; }, {
+      adaptivePlanning: { enabled: true, router: { route() { throw new Error("no eligible model"); } }, policy: { complexity: 1, risk: "low" as const } },
+      executor: { async execute() { executions += 1; return { result: "should-not-run" }; } },
+    });
+    await expect(new AgentSession(createPlanningSessionDependencies(options)).run("adaptive-task", { maxCycles: 2 })).resolves.toEqual({ status: "failed", taskId: "adaptive-task", reason: "no eligible model" });
+    expect(providerCalls).toBe(0);
+    expect(executions).toBe(0);
+  });
+});
